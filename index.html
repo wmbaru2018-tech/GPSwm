@@ -11,15 +11,23 @@ body { margin:0; padding:0; font-family:Arial, sans-serif; }
 #map { height: 90vh; width: 100%; }
 #controls { padding:10px; background:#f0f0f0; }
 select, button, input { margin:5px; padding:5px; }
+.custom-label {
+  background:#007bff;
+  color:white;
+  padding:2px 5px;
+  border-radius:5px;
+  font-size:12px;
+  white-space:nowrap;
+}
 </style>
 </head>
 <body>
 <div id="controls">
-<input type="text" id="username" placeholder="Masukkan nama Anda"/>
-<button onclick="joinTracking()">Gabung</button>
-<select id="userSelect"></select>
-<button onclick="showTrack()">Lihat Riwayat</button>
-<button onclick="deleteTrack()">Hapus Riwayat</button>
+  <input type="text" id="username" placeholder="Masukkan nama Anda"/>
+  <button onclick="joinTracking()">Gabung</button>
+  <select id="userSelect"></select>
+  <button onclick="showTrack()">Lihat Riwayat</button>
+  <button onclick="deleteTrack()">Hapus Riwayat</button>
 </div>
 <div id="map"></div>
 
@@ -30,22 +38,22 @@ import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/
 
 // ✅ Ganti config dengan punyamu
 const firebaseConfig = {
-apiKey: "AIzaSyDScne0riHEgvTsn11HkvzD04QVJFqLQ34",
-authDomain: "gps-wm.firebaseapp.com",
-databaseURL: "https://gps-wm-default-rtdb.firebaseio.com/",
-projectId: "gps-wm",
-storageBucket: "gps-wm.appspot.com",
-messagingSenderId: "681165326569",
-appId: "1:681165326569:web:bcfa5e482f47321a5a4878",
-measurementId: "G-6CS8SPQ37F"
+  apiKey: "AIzaSyDScne0riHEgvTsn11HkvzD04QVJFqLQ34",
+  authDomain: "gps-wm.firebaseapp.com",
+  databaseURL: "https://gps-wm-default-rtdb.firebaseio.com/",
+  projectId: "gps-wm",
+  storageBucket: "gps-wm.appspot.com",
+  messagingSenderId: "681165326569",
+  appId: "1:681165326569:web:bcfa5e482f47321a5a4878",
+  measurementId: "G-6CS8SPQ37F"
 };
-
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
+// Inisialisasi map
 let map = L.map('map').setView([0,0], 2);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-attribution: '© OpenStreetMap contributors'
+  attribution: '© OpenStreetMap'
 }).addTo(map);
 
 let username = null;
@@ -53,92 +61,96 @@ let markers = {};
 let polylines = {};
 let positions = {};
 
-function joinTracking() {
-username = document.getElementById("username").value.trim();
-if (!username) { alert("Masukkan nama dulu"); return; }
-alert("Anda bergabung sebagai: " + username);
-startGPS();
+// Warna berbeda untuk tiap user
+let colors = ["red","blue","green","purple","orange","brown"];
+function getColor(user) {
+  let i = Object.keys(markers).indexOf(user) % colors.length;
+  return colors[i];
 }
 
+// Gabung tracking
+window.joinTracking = function() {
+  username = document.getElementById("username").value.trim();
+  if (!username) { alert("Masukkan nama dulu"); return; }
+  alert("Anda bergabung sebagai: " + username);
+  startGPS();
+}
+
+// Jalankan GPS user
 function startGPS() {
-if (navigator.geolocation) {
-navigator.geolocation.watchPosition(pos => {
-let lat = pos.coords.latitude;
-let lng = pos.coords.longitude;
-let speed = pos.coords.speed ? pos.coords.speed.toFixed(1) : 0;
-let status = speed > 1.5 ? "Naik Kendaraan" : "Jalan Kaki";
+  if (navigator.geolocation) {
+    navigator.geolocation.watchPosition(pos => {
+      let lat = pos.coords.latitude;
+      let lng = pos.coords.longitude;
+      let speed = pos.coords.speed ? pos.coords.speed.toFixed(1) : 0;
+      let status = speed > 1.5 ? "Naik Kendaraan" : "Jalan Kaki";
 
-// simpan ke Firebase
-set(ref(db, "users/" + username), {
-lat, lng, speed, status, timestamp: Date.now()
-});
+      set(ref(db, "users/" + username), {
+        lat, lng, speed, status, timestamp: Date.now()
+      });
 
-// ✅ Fokuskan map ke posisi user saat pertama kali join
-if (!positions[username] || positions[username].length === 0) {
-map.setView([lat, lng], 16);
+    }, err => { console.error(err); }, { enableHighAccuracy:true });
+  } else {
+    alert("GPS tidak didukung di perangkat ini");
+  }
 }
 
-}, err => {
-console.error(err);
-}, { enableHighAccuracy:true });
-} else {
-alert("GPS tidak didukung di perangkat ini");
-}
-}
-
-// 🔄 Realtime update semua user
+// Update realtime semua user
 onValue(ref(db, "users"), snapshot => {
-let data = snapshot.val();
-if (!data) return;
+  let data = snapshot.val();
+  if (!data) return;
 
-document.getElementById("userSelect").innerHTML = "";
-for (let user in data) {
-let {lat, lng, speed, status} = data[user];
+  let userSelect = document.getElementById("userSelect");
+  userSelect.innerHTML = ""; // kosongkan dulu
 
-// marker
-if (!markers[user]) {
-markers[user] = L.marker([lat,lng]).addTo(map);
-map.setView([lat, lng], 16); // ✅ pindahkan map saat marker baru dibuat
-} else {
-markers[user].setLatLng([lat,lng]);
-}
-markers[user].bindPopup(`${user}<br>Speed: ${speed} m/s<br>Status: ${status}`);
+  for (let user in data) {
+    let {lat, lng, speed, status} = data[user];
 
-// track
-if (!positions[user]) positions[user] = [];
-positions[user].push([lat,lng]);
+    // Marker + label nama
+    if (!markers[user]) {
+      markers[user] = L.marker([lat,lng], {
+        icon: L.divIcon({ className:"custom-label", html:user })
+      }).addTo(map);
+      map.setView([lat, lng], 16);
+    } else {
+      markers[user].setLatLng([lat,lng]);
+    }
+    markers[user].bindPopup(`${user}<br>Speed: ${speed} m/s<br>Status: ${status}`);
 
-if (polylines[user]) {
-map.removeLayer(polylines[user]);
-}
-polylines[user] = L.polyline(positions[user], {color:"blue"}).addTo(map);
+    // Simpan track
+    if (!positions[user]) positions[user] = [];
+    positions[user].push([lat,lng]);
 
-// isi dropdown user
-let opt = document.createElement("option");
-opt.value = user;
-opt.innerText = user;
-document.getElementById("userSelect").appendChild(opt);
-}
+    // Gambar ulang polyline
+    if (polylines[user]) map.removeLayer(polylines[user]);
+    polylines[user] = L.polyline(positions[user], {color:getColor(user)}).addTo(map);
+
+    // Dropdown user
+    let opt = document.createElement("option");
+    opt.value = user;
+    opt.innerText = user;
+    userSelect.appendChild(opt);
+  }
 });
 
-// tombol lihat track
+// Tombol lihat track
 window.showTrack = function() {
-let u = document.getElementById("userSelect").value;
-if (positions[u]) {
-map.fitBounds(L.polyline(positions[u]).getBounds());
-}
+  let u = document.getElementById("userSelect").value;
+  if (positions[u]) {
+    map.fitBounds(L.polyline(positions[u]).getBounds());
+  }
 }
 
-// tombol hapus track
+// Tombol hapus track
 window.deleteTrack = function() {
-let u = document.getElementById("userSelect").value;
-if (u) {
-remove(ref(db, "users/" + u));
-if (markers[u]) map.removeLayer(markers[u]);
-if (polylines[u]) map.removeLayer(polylines[u]);
-positions[u] = [];
-alert("Riwayat " + u + " dihapus");
-}
+  let u = document.getElementById("userSelect").value;
+  if (u) {
+    remove(ref(db, "users/" + u));
+    if (markers[u]) map.removeLayer(markers[u]);
+    if (polylines[u]) map.removeLayer(polylines[u]);
+    positions[u] = [];
+    alert("Riwayat " + u + " dihapus");
+  }
 }
 </script>
 </body>
