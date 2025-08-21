@@ -1,0 +1,172 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPS Tracking 6 Orang</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<style>
+body, html { margin: 0; padding: 0; height: 100%; }
+#map { height: 70%; width: 100%; }
+#userForm { padding: 10px; background: #f0f0f0; }
+#userForm input, #userForm select, #userForm button { margin: 5px; }
+.popup-btn {
+background: #c00;
+color: #fff;
+border: none;
+padding: 4px 8px;
+border-radius: 6px;
+cursor: pointer;
+font-size: 12px;
+}
+</style>
+</head>
+<body>
+
+<div id="userForm">
+<label>Nama: <input type="text" id="nameInput"></label>
+<label>User ID:
+<select id="userSelect">
+<option value="user1">User 1</option>
+<option value="user2">User 2</option>
+<option value="user3">User 3</option>
+<option value="user4">User 4</option>
+<option value="user5">User 5</option>
+<option value="user6">User 6</option>
+</select>
+</label>
+<label>
+Mode:
+<select id="modeSelect">
+<option value="jalan">🚶 Jalan</option>
+<option value="mobil">🚗 Mobil</option>
+<option value="default">🔵 Default</option>
+</select>
+</label>
+<button onclick="registerUser()">Gabung</button>
+</div>
+
+<div id="map"></div>
+
+<script type="module">
+// Firebase SDK
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-app.js";
+import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.4/firebase-database.js";
+
+// Config Firebase kamu
+const firebaseConfig = {
+apiKey: "AIzaSyDScne0riHEgvTsn11HkvzD04QVJFqLQ34",
+authDomain: "gps-wm.firebaseapp.com",
+projectId: "gps-wm",
+storageBucket: "gps-wm.firebasestorage.app",
+messagingSenderId: "681165326569",
+appId: "1:681165326569:web:bcfa5e482f47321a5a4878",
+measurementId: "G-6CS8SPQ37F",
+databaseURL: "https://gps-wm-default-rtdb.asia-southeast1.firebasedatabase.app/"
+};
+
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// Map init
+const map = L.map('map').setView([-6.2, 106.816666], 13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+attribution: '&copy; OpenStreetMap contributors'
+}).addTo(map);
+
+const markers = {};
+const polylines = {};
+const paths = {};
+const colors = ['red', 'blue', 'green', 'orange', 'purple', 'brown'];
+
+let currentUserId = null;
+
+// Icon custom
+const icons = {
+jalan: L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/1041/1041883.png", iconSize: [32, 32] }),
+mobil: L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/743/743131.png", iconSize: [32, 32] }),
+default: L.icon({ iconUrl: "https://cdn-icons-png.flaticon.com/512/64/64113.png", iconSize: [32, 32] })
+};
+
+// Gabung user
+function registerUser() {
+currentUserId = document.getElementById('userSelect').value;
+const name = document.getElementById('nameInput').value || currentUserId;
+const mode = document.getElementById('modeSelect').value;
+
+if (!navigator.geolocation) {
+alert("GPS tidak tersedia di browser ini.");
+return;
+}
+
+// Tracking posisi
+navigator.geolocation.watchPosition((pos) => {
+const lat = pos.coords.latitude;
+const lng = pos.coords.longitude;
+const acc = pos.coords.accuracy;
+const speed = pos.coords.speed ? (pos.coords.speed * 3.6).toFixed(1) : 0;
+
+// Simpan ke Firebase
+set(ref(db, "users/" + currentUserId), {
+name: name,
+lat: lat,
+lng: lng,
+acc: acc,
+speed: speed,
+mode: mode,
+color: colors[parseInt(currentUserId.replace("user", "")) - 1]
+});
+}, (err) => console.error(err), { enableHighAccuracy: true });
+}
+window.registerUser = registerUser;
+
+// Hapus jejak user
+function hapusJejak(userId) {
+remove(ref(db, "users/" + userId)).then(() => {
+if (markers[userId]) { map.removeLayer(markers[userId]); delete markers[userId]; }
+if (polylines[userId]) { map.removeLayer(polylines[userId]); delete polylines[userId]; }
+if (paths[userId]) delete paths[userId];
+});
+}
+window.hapusJejak = hapusJejak;
+
+// Realtime listener semua user
+onValue(ref(db, "users"), (snapshot) => {
+const data = snapshot.val();
+if (!data) return;
+
+Object.keys(data).forEach(userId => {
+const u = data[userId];
+if (!paths[userId]) paths[userId] = [];
+paths[userId].push([u.lat, u.lng]);
+
+// Polyline
+if (polylines[userId]) {
+polylines[userId].setLatLngs(paths[userId]);
+} else {
+polylines[userId] = L.polyline(paths[userId], { color: u.color, weight: 4 }).addTo(map);
+}
+
+// Marker + popup dengan tombol hapus
+const popupHtml = `
+<b>${u.name}</b><br>
+Speed: ${u.speed} km/h<br>
+Akurasi: ±${u.acc.toFixed(1)} m<br>
+<button class="popup-btn" onclick="hapusJejak('${userId}')">Hapus Jejak</button>
+`;
+
+if (markers[userId]) {
+markers[userId].setLatLng([u.lat, u.lng]);
+markers[userId].setPopupContent(popupHtml);
+} else {
+markers[userId] = L.marker([u.lat, u.lng], { icon: icons[u.mode] }).addTo(map)
+.bindPopup(popupHtml)
+.openPopup();
+}
+});
+});
+</script>
+
+</body>
+</html>
