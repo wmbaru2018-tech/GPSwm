@@ -1,0 +1,250 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>GPS Tracking 6 Orang Realtime (Offline Safe)</title>
+<link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
+<script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
+<script src="https://unpkg.com/leaflet-image/leaflet-image.js"></script>
+<style>
+body, html { margin:0; padding:0; font-family: Arial; }
+#map, #historyMap { height: 400px; width: 100%; }
+#userForm, #historyControls { padding:10px; background:#f0f0f0; margin-bottom:5px; }
+#userForm input, #userForm select, #userForm button { margin:5px; }
+#userList { margin-top:10px; }
+#downloadBtn { margin:5px; }
+</style>
+</head>
+<body>
+
+<div id="userForm">
+<label>Nama: <input type="text" id="nameInput"></label>
+<label>User ID:
+<select id="userSelect">
+<option value="user1">User 1</option>
+<option value="user2">User 2</option>
+<option value="user3">User 3</option>
+<option value="user4">User 4</option>
+<option value="user5">User 5</option>
+<option value="user6">User 6</option>
+</select>
+</label>
+<button onclick="registerUser()">Gabung</button>
+</div>
+
+<div id="userList"></div>
+<div id="map"></div>
+
+<div id="historyControls" style="display:none;">
+<h3>Riwayat Track</h3>
+<label>Pilih User:
+<select id="historyUserSelect"></select>
+</label>
+<button onclick="showHistoryMap()">Tampilkan</button>
+<button onclick="deleteHistory()">Hapus Track</button>
+<button id="downloadBtn">Download Gambar</button>
+</div>
+
+<div id="historyMapContainer" style="display:none;">
+<div id="historyMap"></div>
+</div>
+
+<script type="module">
+import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-app.js";
+import { getDatabase, ref, set, push, onValue, remove, limitToLast, query } from "https://www.gstatic.com/firebasejs/10.13.0/firebase-database.js";
+
+// ===== Firebase =====
+const firebaseConfig = {
+apiKey: "AIzaSyA8VQ40GKTpIKpk9RCi0OKIagrkRXrmqbM",
+authDomain: "gpswm-49058.firebaseapp.com",
+databaseURL: "https://gpswm-49058-default-rtdb.firebaseio.com",
+projectId: "gpswm-49058",
+storageBucket: "gpswm-49058.appspot.com",
+messagingSenderId: "639341845725",
+appId: "1:639341845725:web:9e5f9f408ea8607c374f34",
+measurementId: "G-CB2SXXKPN5"
+};
+const app = initializeApp(firebaseConfig);
+const db = getDatabase(app);
+
+// ===== Leaflet =====
+const map = L.map('map').setView([-6.2,106.8],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png',{ attribution:'&copy; OpenStreetMap contributors'}).addTo(map);
+
+const markers = {};
+const polylines = {};
+const users = {};
+const colors = ['red','blue','green','orange','purple','brown'];
+
+const icons = {
+jalan: L.icon({iconUrl:'https://cdn-icons-png.flaticon.com/512/149/149059.png', iconSize:[30,30]}),
+mobil: L.icon({iconUrl:'https://cdn-icons-png.flaticon.com/512/743/743131.png', iconSize:[30,30]}),
+orang: L.icon({iconUrl:'https://cdn-icons-png.flaticon.com/512/147/147144.png', iconSize:[30,30]})
+};
+
+function getMode(speed){
+if(speed>10) return 'mobil';
+if(speed>0) return 'jalan';
+return 'orang';
+}
+
+// ===== User gabung =====
+function registerUser(){
+const id = document.getElementById('userSelect').value;
+const name = document.getElementById('nameInput').value || id;
+if(users[id]) { alert('User sudah gabung!'); return; }
+const color = colors[Object.keys(users).length];
+users[id] = {name, color, visible:true};
+addUserCheckbox(id);
+addHistoryUserOption(id);
+startTracking(id);
+}
+
+// Checkbox show/hide user
+function addUserCheckbox(id){
+const div = document.getElementById('userList');
+const label = document.createElement('label');
+label.innerHTML = `<input type="checkbox" id="chk_${id}" checked onchange="toggleUser('${id}')"> ${users[id].name}`;
+div.appendChild(label);
+}
+
+function toggleUser(id){
+users[id].visible = document.getElementById(`chk_${id}`).checked;
+if(markers[id]) markers[id][users[id].visible?'addTo':'removeFrom'](map);
+if(polylines[id]) polylines[id][users[id].visible?'addTo':'removeFrom'](map);
+}
+
+// ===== Tracking =====
+function startTracking(userId){
+if(!navigator.geolocation){ alert('GPS tidak tersedia'); return; }
+
+navigator.geolocation.watchPosition((pos)=>{
+const lat = pos.coords.latitude;
+const lng = pos.coords.longitude;
+const speed = pos.coords.speed? pos.coords.speed*3.6:0;
+const mode = getMode(speed);
+
+// Update posisi realtime
+set(ref(db, 'locations/'+userId), {
+name: users[userId].name,
+lat, lng, speed, mode,
+timestamp: Date.now()
+});
+
+// Simpan riwayat track dengan batas 100 titik terakhir
+const trackRef = push(ref(db, 'tracks/'+userId), {lat,lng,speed,mode,timestamp:Date.now()});
+limitHistory(userId);
+
+}, err=>console.error(err), {enableHighAccuracy:true, maximumAge:0, timeout:5000});
+}
+
+// Limit riwayat track max 100 titik
+function limitHistory(userId){
+const trackQuery = query(ref(db,'tracks/'+userId), limitToLast(101));
+onValue(trackQuery, snapshot=>{
+const data = snapshot.val();
+if(data){
+const keys = Object.keys(data);
+if(keys.length>100){
+// hapus titik paling lama
+remove(ref(db,'tracks/'+userId+'/'+keys[0]));
+}
+}
+}, {onlyOnce:true});
+}
+
+// ===== Realtime Listener =====
+onValue(ref(db, 'locations/'), snapshot=>{
+const data = snapshot.val();
+if(!data) return;
+
+Object.keys(data).forEach(id=>{
+const u = data[id];
+if(!users[id]) return;
+
+if(polylines[id]){
+polylines[id].addLatLng([u.lat, u.lng]);
+} else {
+polylines[id] = L.polyline([[u.lat,u.lng]],{color:users[id].color,weight:4});
+if(users[id].visible) polylines[id].addTo(map);
+}
+
+if(markers[id]){
+markers[id].setLatLng([u.lat,u.lng]);
+markers[id].setIcon(icons[u.mode]);
+markers[id].setTooltipContent(`${users[id].name}<br>Speed: ${u.speed.toFixed(1)} km/h<br>Mode: ${u.mode}`);
+} else {
+markers[id] = L.marker([u.lat,u.lng],{icon:icons[u.mode]})
+.bindTooltip(`${users[id].name}<br>Speed: ${u.speed.toFixed(1)} km/h<br>Mode: ${u.mode}`, {permanent:true,direction:'right',offset:[10,0]})
+.addTo(users[id].visible?map:null);
+}
+});
+
+const allPoints = Object.values(data).map(u=>[u.lat,u.lng]);
+if(allPoints.length>0) map.fitBounds(allPoints,{padding:[50,50]});
+});
+
+// ===== Riwayat =====
+function addHistoryUserOption(id){
+const sel = document.getElementById('historyUserSelect');
+const opt = document.createElement('option');
+opt.value = id; opt.textContent = users[id].name;
+sel.appendChild(opt);
+document.getElementById('historyControls').style.display='block';
+}
+
+let historyMap = null;
+function showHistoryMap(){
+const userId = document.getElementById('historyUserSelect').value;
+if(!userId) return;
+
+document.getElementById('historyMapContainer').style.display='block';
+if(historyMap) historyMap.remove();
+historyMap = L.map('historyMap',{attributionControl:false}).setView([-6.2,106.8],13);
+L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png').addTo(historyMap);
+historyMap.invalidateSize();
+
+// Ambil track terakhir 100 titik
+const trackQuery = query(ref(db,'tracks/'+userId), limitToLast(100));
+onValue(trackQuery, snapshot=>{
+const data = snapshot.val();
+if(!data) return;
+const latlngs = Object.values(data).map(p=>[p.lat,p.lng]);
+L.polyline(latlngs,{color:users[userId].color,weight:4}).addTo(historyMap);
+
+const last = latlngs[latlngs.length-1];
+const lastData = Object.values(data)[latlngs.length-1];
+L.marker([last[0],last[1]],{icon:icons[lastData.mode]})
+.bindTooltip(`${users[userId].name}<br>Speed: ${lastData.speed.toFixed(1)} km/h`, {permanent:true,direction:'right',offset:[10,0]})
+.addTo(historyMap);
+
+historyMap.fitBounds(latlngs,{padding:[50,50]});
+});
+}
+
+// Hapus riwayat
+function deleteHistory(){
+const userId = document.getElementById('historyUserSelect').value;
+if(!userId) return;
+remove(ref(db,'tracks/'+userId));
+alert(`Riwayat ${users[userId].name} telah dihapus`);
+if(historyMap) historyMap.remove();
+document.getElementById('historyMapContainer').style.display='none';
+}
+
+// Download riwayat map
+document.getElementById('downloadBtn').onclick = ()=>{
+if(!historyMap){ alert('Tampilkan riwayat dulu'); return; }
+leafletImage(historyMap,(err,canvas)=>{
+const img = canvas.toDataURL();
+const link = document.createElement('a');
+link.href = img;
+link.download='riwayat_track.png';
+link.click();
+});
+}
+
+</script>
+</body>
+</html>
