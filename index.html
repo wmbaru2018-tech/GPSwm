@@ -68,10 +68,19 @@ let lng = pos.coords.longitude;
 let speed = pos.coords.speed ? pos.coords.speed.toFixed(1) : 0;
 let status = speed > 1.5 ? "Naik Kendaraan" : "Jalan Kaki";
 
+// simpan ke Firebase
 set(ref(db, "users/" + username), {
 lat, lng, speed, status, timestamp: Date.now()
 });
-}, err => { console.error(err); }, { enableHighAccuracy:true });
+
+// ✅ Fokuskan map ke posisi user saat pertama kali join
+if (!positions[username] || positions[username].length === 0) {
+map.setView([lat, lng], 16);
+}
+
+}, err => {
+console.error(err);
+}, { enableHighAccuracy:true });
 } else {
 alert("GPS tidak didukung di perangkat ini");
 }
@@ -89,6 +98,7 @@ let {lat, lng, speed, status} = data[user];
 // marker
 if (!markers[user]) {
 markers[user] = L.marker([lat,lng]).addTo(map);
+map.setView([lat, lng], 16); // ✅ pindahkan map saat marker baru dibuat
 } else {
 markers[user].setLatLng([lat,lng]);
 }
