@@ -3,40 +3,30 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>GPS Tracker 6 Orang</title>
+<title>Peta GPS Tracker</title>
 <link rel="stylesheet" href="https://unpkg.com/leaflet/dist/leaflet.css"/>
 <script src="https://unpkg.com/leaflet/dist/leaflet.js"></script>
 <style>
-body { margin:0; padding:0; font-family:Arial, sans-serif; }
-#map { height: 90vh; width: 100%; }
-#controls { padding:10px; background:#f0f0f0; }
-select, button, input { margin:5px; padding:5px; }
-.custom-label {
-  background:#007bff;
-  color:white;
-  padding:2px 5px;
-  border-radius:5px;
-  font-size:12px;
-  white-space:nowrap;
-}
+  body { margin:0; padding:0; font-family:Arial, sans-serif; }
+  #map { height: 100vh; width: 100%; }
+  .label-marker {
+    background:#007bff;
+    color:white;
+    padding:2px 5px;
+    border-radius:5px;
+    font-size:12px;
+    white-space:nowrap;
+  }
 </style>
 </head>
 <body>
-<div id="controls">
-  <input type="text" id="username" placeholder="Masukkan nama Anda"/>
-  <button onclick="joinTracking()">Gabung</button>
-  <select id="userSelect"></select>
-  <button onclick="showTrack()">Lihat Riwayat</button>
-  <button onclick="deleteTrack()">Hapus Riwayat</button>
-</div>
 <div id="map"></div>
 
-<!-- Firebase -->
 <script type="module">
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
-import { getDatabase, ref, set, onValue, remove } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
+import { getDatabase, ref, set, onValue } from "https://www.gstatic.com/firebasejs/10.12.0/firebase-database.js";
 
-// ✅ Ganti config dengan punyamu
+// 🔑 Ganti config sesuai project Firebase-mu
 const firebaseConfig = {
   apiKey: "AIzaSyDScne0riHEgvTsn11HkvzD04QVJFqLQ34",
   authDomain: "gps-wm.firebaseapp.com",
@@ -50,108 +40,59 @@ const firebaseConfig = {
 const app = initializeApp(firebaseConfig);
 const db = getDatabase(app);
 
-// Inisialisasi map
+// Inisialisasi peta
 let map = L.map('map').setView([0,0], 2);
 L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenStreetMap'
 }).addTo(map);
 
-let username = null;
 let markers = {};
-let polylines = {};
+let tracks = {};
 let positions = {};
+let warna = ["red","blue","green","purple","orange","brown"];
 
-// Warna berbeda untuk tiap user
-let colors = ["red","blue","green","purple","orange","brown"];
-function getColor(user) {
-  let i = Object.keys(markers).indexOf(user) % colors.length;
-  return colors[i];
-}
+// Nama random biar gampang tes
+let username = "User" + Math.floor(Math.random()*100);
 
-// Gabung tracking
-window.joinTracking = function() {
-  username = document.getElementById("username").value.trim();
-  if (!username) { alert("Masukkan nama dulu"); return; }
-  alert("Anda bergabung sebagai: " + username);
-  startGPS();
-}
-
-// Jalankan GPS user
-function startGPS() {
-  if (navigator.geolocation) {
-    navigator.geolocation.watchPosition(pos => {
-      let lat = pos.coords.latitude;
-      let lng = pos.coords.longitude;
-      let speed = pos.coords.speed ? pos.coords.speed.toFixed(1) : 0;
-      let status = speed > 1.5 ? "Naik Kendaraan" : "Jalan Kaki";
-
-      set(ref(db, "users/" + username), {
-        lat, lng, speed, status, timestamp: Date.now()
-      });
-
-    }, err => { console.error(err); }, { enableHighAccuracy:true });
-  } else {
-    alert("GPS tidak didukung di perangkat ini");
-  }
+// Mulai tracking GPS user ini
+if (navigator.geolocation) {
+  navigator.geolocation.watchPosition(pos => {
+    let lat = pos.coords.latitude;
+    let lng = pos.coords.longitude;
+    set(ref(db,"users/"+username), { lat, lng, time: Date.now() });
+  }, err => console.error(err), { enableHighAccuracy:true });
+} else {
+  alert("GPS tidak tersedia");
 }
 
 // Update realtime semua user
-onValue(ref(db, "users"), snapshot => {
-  let data = snapshot.val();
+onValue(ref(db,"users"), snap => {
+  let data = snap.val();
   if (!data) return;
 
-  let userSelect = document.getElementById("userSelect");
-  userSelect.innerHTML = ""; // kosongkan dulu
+  for (let u in data) {
+    let {lat, lng} = data[u];
 
-  for (let user in data) {
-    let {lat, lng, speed, status} = data[user];
-
-    // Marker + label nama
-    if (!markers[user]) {
-      markers[user] = L.marker([lat,lng], {
-        icon: L.divIcon({ className:"custom-label", html:user })
+    // Marker dengan nama
+    if (!markers[u]) {
+      markers[u] = L.marker([lat,lng], {
+        icon: L.divIcon({ className:"label-marker", html:u })
       }).addTo(map);
-      map.setView([lat, lng], 16);
+      map.setView([lat,lng], 15);
     } else {
-      markers[user].setLatLng([lat,lng]);
+      markers[u].setLatLng([lat,lng]);
     }
-    markers[user].bindPopup(`${user}<br>Speed: ${speed} m/s<br>Status: ${status}`);
 
-    // Simpan track
-    if (!positions[user]) positions[user] = [];
-    positions[user].push([lat,lng]);
+    // Simpan posisi untuk track
+    if (!positions[u]) positions[u] = [];
+    positions[u].push([lat,lng]);
 
-    // Gambar ulang polyline
-    if (polylines[user]) map.removeLayer(polylines[user]);
-    polylines[user] = L.polyline(positions[user], {color:getColor(user)}).addTo(map);
-
-    // Dropdown user
-    let opt = document.createElement("option");
-    opt.value = user;
-    opt.innerText = user;
-    userSelect.appendChild(opt);
+    // Gambar ulang jalur
+    if (tracks[u]) map.removeLayer(tracks[u]);
+    let col = warna[Object.keys(markers).indexOf(u) % warna.length];
+    tracks[u] = L.polyline(positions[u], {color:col}).addTo(map);
   }
 });
-
-// Tombol lihat track
-window.showTrack = function() {
-  let u = document.getElementById("userSelect").value;
-  if (positions[u]) {
-    map.fitBounds(L.polyline(positions[u]).getBounds());
-  }
-}
-
-// Tombol hapus track
-window.deleteTrack = function() {
-  let u = document.getElementById("userSelect").value;
-  if (u) {
-    remove(ref(db, "users/" + u));
-    if (markers[u]) map.removeLayer(markers[u]);
-    if (polylines[u]) map.removeLayer(polylines[u]);
-    positions[u] = [];
-    alert("Riwayat " + u + " dihapus");
-  }
-}
 </script>
 </body>
 </html>
